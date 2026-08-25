@@ -1,70 +1,94 @@
-import { useState, useEffect } from 'react';
+import { useReducer } from 'react';
 import axios from 'axios';
 import './App.css';
 import { AdvancedImage } from '@cloudinary/react';
 import { fill } from '@cloudinary/url-gen/actions/resize';
-import { Cloudinary } from '@cloudinary/url-gen';
+import { Cloudinary, CloudinaryImage } from '@cloudinary/url-gen';
 import ReactMarkdown from 'react-markdown';
 import AudioPlayer from './AudioPlayer';
 
+const cld = new Cloudinary({
+  cloud: {
+    cloudName: import.meta.env.VITE_CLOUDINARY_CLOUD_NAME ?? 'ai-devx-demo',
+  },
+});
+
+interface CaptionResponse {
+  public_id: string;
+  caption: string;
+  story: { content: string };
+}
+
+type State =
+  | { phase: 'idle' }
+  | { phase: 'uploading' }
+  | { phase: 'ready'; cldImage: CloudinaryImage; caption: string; story: string }
+  | { phase: 'error'; message: string };
+
+type Action =
+  | { type: 'UPLOAD_START' }
+  | { type: 'UPLOAD_SUCCESS'; cldImage: CloudinaryImage; caption: string; story: string }
+  | { type: 'UPLOAD_ERROR'; message: string };
+
+const initialState: State = { phase: 'idle' };
+
+function reducer(_state: State, action: Action): State {
+  switch (action.type) {
+    case 'UPLOAD_START':
+      return { phase: 'uploading' };
+    case 'UPLOAD_SUCCESS':
+      return {
+        phase: 'ready',
+        cldImage: action.cldImage,
+        caption: action.caption,
+        story: action.story,
+      };
+    case 'UPLOAD_ERROR':
+      return { phase: 'error', message: action.message };
+  }
+}
+
 const ImageUpload = () => {
-  const [image, setImage] = useState(null);
-  const [caption, setCaption] = useState('');
-  const [story, setStory] = useState('');
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [shouldSubmit, setShouldSubmit] = useState(false);
-  const cld = new Cloudinary({
-    cloud: {
-      cloudName: 'ai-devx-demo'
-    }
-  });
+  const [state, dispatch] = useReducer(reducer, initialState);
 
-  useEffect(() => {
-    if (shouldSubmit && image) {
-      handleSubmit();
-    }
-  }, [shouldSubmit, image]);
-
-  const handleImageChange = (e) => {
-    if (e.target.files[0] !== null) {
-      setImage(e.target.files[0]);
-      setShouldSubmit(true);
-    }
-  };
-
-  const handleSubmit = async () => {
-    if (!image) {
-      alert('Please select an image to upload');
-      setShouldSubmit(false);
-      return;
-    }
+  const uploadImage = async (file: File) => {
+    dispatch({ type: 'UPLOAD_START' });
 
     const formData = new FormData();
-    formData.append('image', image);
+    formData.append('image', file);
 
     try {
-      setLoading(true);
-      const response = await axios.post('http://localhost:3000/api/caption', formData, {
+      const response = await axios.post<CaptionResponse>('/api/caption', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
       });
-      setCaption(response.data.caption);
-      setStory(response.data.story.content);
-      const myImage = cld.image(response.data.public_id); 
 
-      // Resize to 250 x 250 pixels using the 'fill' crop mode.
-      myImage.resize(fill().width(500).height(500));
-      setImage(myImage);
-      setError(''); // Clear any previous error messages
+      const cldImage = cld.image(response.data.public_id);
+      cldImage.resize(fill().width(500).height(500));
+
+      dispatch({
+        type: 'UPLOAD_SUCCESS',
+        cldImage,
+        caption: response.data.caption,
+        story: response.data.story.content,
+      });
     } catch (error) {
       console.error('Error uploading image:', error);
-      setError('Error uploading image: ' + error.message);
-    } finally {
-      setShouldSubmit(false);
+      const message = axios.isAxiosError(error)
+        ? error.response?.data?.error ?? error.message
+        : 'Unexpected error uploading image';
+      dispatch({ type: 'UPLOAD_ERROR', message: `Error uploading image: ${message}` });
     }
   };
+
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    uploadImage(file);
+  };
+
+  const isUploading = state.phase === 'uploading';
 
   return (
     <div className="app">
@@ -75,14 +99,14 @@ const ImageUpload = () => {
           Choose File
         </label>
       </form>
-      {loading && <div className="spinner"></div>}
-      {error && <p style={{ color: 'red' }}>{error}</p>}
-      {image && !loading && <AdvancedImage cldImg={image} alt={caption} />}
-      {story && (
-        <div>
-          <AudioPlayer text={story} setLoading={setLoading}/>
-          {!loading && <ReactMarkdown>{story}</ReactMarkdown>}
-        </div>
+      {isUploading && <div className="spinner"></div>}
+      {state.phase === 'error' && <p style={{ color: 'red' }}>{state.message}</p>}
+      {state.phase === 'ready' && (
+        <>
+          <AdvancedImage cldImg={state.cldImage} alt={state.caption} />
+          <AudioPlayer text={state.story} />
+          <ReactMarkdown>{state.story}</ReactMarkdown>
+        </>
       )}
     </div>
   );
