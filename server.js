@@ -107,20 +107,12 @@ const generateBlog = async(caption) => {
     content: `create an 300 world blog post to be used as part of a marketing campaign from a business-- the blog must focused on the vertical industry of that image based on the following caption of the image: ${caption}. This blog is not for the business but for the person interested in the vetical industry of the image`
   }
 
-  /**
-   * Call the OpenAI SDK and get a response
-   */
-  try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
-      messages: [message], // pass the new message and the previous messages
-    });
-    console.log('open ai response', response.choices[0].message);
-    return response.choices[0].message;
-  } catch (error) {
-    console.error(error);
-    return `error: Internal Server Error`;
-  }
+  const response = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [message],
+  });
+
+  return response.choices[0].message;
 };
 
 app.use(express.static(path.resolve(__dirname, "public")));
