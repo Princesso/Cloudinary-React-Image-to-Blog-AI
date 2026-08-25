@@ -34,33 +34,56 @@ cloudinary.config({
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
+// Uploads a buffer to Cloudinary with auto-captioning, resolving once the
+// stream callback fires so callers can safely `await` it.
+const uploadImageWithCaptioning = (buffer) => {
+  return new Promise((resolve, reject) => {
+    const uploadStream = cloudinary.uploader.upload_stream(
+      { detection: 'captioning' },
+      (error, result) => {
+        if (error) {
+          return reject(error);
+        }
+        resolve(result);
+      }
+    );
+
+    streamifier.createReadStream(buffer).pipe(uploadStream);
+  });
+};
+
 // Define a POST endpoint to handle image upload
-app.post('/api/caption', upload.single('image'), (req, res) => {
+app.post('/api/caption', upload.single('image'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'Image file is required' });
   }
 
-  const uploadStream = cloudinary.uploader.upload_stream(
-    { detection: 'captioning' },
-     async (error, result) => {
-      if (error) {
-        console.error('Cloudinary error:', error);
-        return res.status(500).json({ error: error.message });
-      }
-      const story = await generateBlog(result.info.detection.captioning.data.caption)
-      const resObj = {
-        public_id: result.public_id,
-        caption: result.info.detection.captioning.data.caption,
-        story
-      }
-      res.json(resObj);
-    }
-  );
+  try {
+    const result = await uploadImageWithCaptioning(req.file.buffer);
 
-  streamifier.createReadStream(req.file.buffer).pipe(uploadStream);
+    const caption = result.info?.detection?.captioning?.data?.caption;
+    if (!caption) {
+      console.error('Cloudinary response missing captioning data:', result.info?.detection);
+      return res.status(502).json({ error: 'Cloudinary did not return an image caption' });
+    }
+
+    const story = await generateBlog(caption);
+    res.json({
+      public_id: result.public_id,
+      caption,
+      story,
+    });
+  } catch (error) {
+    console.error('Error processing image upload:', error);
+    res.status(500).json({ error: error.message ?? 'Failed to process image upload' });
+  }
 });
 
 app.post("/api/generate-audio", async (req, res) => {
+  if (typeof req.body.text !== "string" || !req.body.text.trim()) {
+    return res.status(400).json({ error: "text is required" });
+  }
+
   try {
     const mp3 = await openai.audio.speech.create({
       model: "tts-1",
