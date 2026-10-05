@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import ReactPlayer from "react-player";
 
 interface AudioPlayerProps {
@@ -9,14 +9,8 @@ const AudioPlayer = ({ text }: AudioPlayerProps) => {
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const previousTextRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (previousTextRef.current === text) {
-      return;
-    }
-    previousTextRef.current = text;
-
     const controller = new AbortController();
 
     const generateAudio = async () => {
